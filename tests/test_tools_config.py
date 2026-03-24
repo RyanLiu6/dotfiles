@@ -91,6 +91,18 @@ def test_memory_generate_source_exists(tools_config: dict[str, Any], ai_root: Pa
             )
 
 
+def test_agents_symlink_source_exists(tools_config: dict[str, Any], ai_root: Path) -> None:
+    for tool_id, tool in tools_config["tools"].items():
+        if "agents_symlink" in tool:
+            source = ai_root / tool["agents_symlink"]["source"]
+            assert source.exists(), (
+                f"Tool '{tool_id}' agents_symlink source does not exist: {source}"
+            )
+            assert source.is_dir(), (
+                f"Tool '{tool_id}' agents_symlink source is not a directory: {source}"
+            )
+
+
 def test_extra_skills_dirs_exist(tools_config: dict[str, Any], ai_root: Path) -> None:
     for _tool_id, tool in tools_config["tools"].items():
         for extra_dir in tool.get("extra_skills_dirs", []):

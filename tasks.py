@@ -42,6 +42,9 @@ def _load_ai_tool_paths() -> list[str]:
         if "skills_symlink" in tool:
             paths.append(f"{rel_dir}/{tool['skills_symlink']['target']}")
 
+        if "agents_symlink" in tool:
+            paths.append(f"{rel_dir}/{tool['agents_symlink']['target']}")
+
         if "skills_generate" in tool:
             paths.append(f"{rel_dir}/{tool['skills_generate']['target']}")
 

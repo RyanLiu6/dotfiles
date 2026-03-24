@@ -32,6 +32,11 @@ class SkillsSymlink(TypedDict):
     target: str
 
 
+class AgentsSymlink(TypedDict):
+    source: str
+    target: str
+
+
 class SkillsGenerate(TypedDict):
     source: str
     target: str
@@ -56,6 +61,7 @@ class ToolConfig(TypedDict, total=False):
     symlinks: list[Symlink]
     settings_template: SettingsTemplate
     skills_symlink: SkillsSymlink
+    agents_symlink: AgentsSymlink
     skills_generate: SkillsGenerate
     memory_generate: MemoryGenerate
     extra_skills_dirs: list[str]
@@ -317,6 +323,42 @@ def symlink_skills_to_config(
     return success
 
 
+def symlink_agents_to_config(source_dir: Path, target_dir: Path) -> bool:
+    """Symlink individual agent .md files from source directory into the config agents directory.
+
+    Args:
+        source_dir: Directory containing agent .md files.
+        target_dir: The config agents directory (e.g., ~/.config/opencode/agents/).
+
+    Returns:
+        True if all symlinks were created successfully, False if any failed.
+    """
+    if not source_dir.exists():
+        print_colored(f"  Warning: Agents directory not found at {source_dir}", Colors.RED)
+        return False
+
+    backup_if_exists(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    md_files = list(source_dir.glob("*.md"))
+    if not md_files:
+        print_colored(f"  Warning: No agent files found in {source_dir}", Colors.YELLOW)
+        return False
+
+    print_colored(f"  Linking agents from {source_dir}", Colors.GREEN)
+
+    for md_file in md_files:
+        target_link = target_dir / md_file.name
+
+        if target_link.exists() or target_link.is_symlink():
+            target_link.unlink()
+
+        target_link.symlink_to(md_file)
+        print(f"    {md_file.name} -> {md_file}")
+
+    return True
+
+
 def generate_memory(source_dir: Path, config_dir: Path, target: str, mode: str) -> bool:
     """Concatenate or copy memory files for tools without @ import support.
 
@@ -454,6 +496,14 @@ def setup_tool(tool_id: str, tool_config: ToolConfig, ai_root: Path) -> bool:
                 skills_dirs.append(ai_root / extra_dir_str)
 
         if not symlink_skills_to_config(skills_dirs, target_dir, "skills"):
+            success = False
+
+    if "agents_symlink" in tool_config:
+        agents_cfg = tool_config["agents_symlink"]
+        source_dir = ai_root / agents_cfg["source"]
+        target_dir = config_dir / agents_cfg["target"]
+
+        if not symlink_agents_to_config(source_dir, target_dir):
             success = False
 
     if "skills_generate" in tool_config:
