@@ -1,0 +1,128 @@
+# AI Tools
+
+The `ai/` directory manages configurations for multiple AI CLI tools from a single source of truth.
+
+## Overview
+
+```
+ai/
+├── memory/             Shared memory files (@-imported by tool-specific CLAUDE.md)
+├── modules/            Per-tool configs deployed via symlink
+│   ├── claude/         Claude Code: CLAUDE.md, hooks/, settings.json, statusline.sh
+│   ├── gemini/         Gemini CLI: GEMINI.md
+│   ├── opencode/       OpenCode: AGENTS.md, opencode.json, agents/
+│   ├── cursor/         Cursor
+│   ├── antigravity/    Antigravity
+│   └── vscode/         VS Code
+├── skills/             Shared skill definitions (consumed by all supporting tools)
+├── templates/          Reusable templates for repo-level files
+├── tools.json          Tool registry — schema below
+└── work/               Work-specific configs (gitignored, not committed)
+```
+
+## tools.json Schema
+
+Each tool entry in `tools.json` defines how `scripts/setup.py` deploys it:
+
+```jsonc
+{
+  "name": "Claude Code",          // Display name
+  "config_dir": "~/.claude",      // Where configs are deployed
+  "tool_dir": "modules/claude",   // Source directory (relative to ai/)
+  "symlinks": [                   // Files/dirs symlinked into config_dir
+    {"source": "CLAUDE.md", "target": "CLAUDE.md"}
+  ],
+  "settings_template": {          // Copy template if target doesn't exist
+    "template": "settings.template.json",
+    "target": "settings.json"
+  },
+  "skills_symlink": {             // Symlink individual skills into config_dir/target/
+    "source": "skills",
+    "target": "skills"
+  },
+  "agents_symlink": {             // Symlink agent .md files (OpenCode)
+    "source": "modules/opencode/agents",
+    "target": "agents"
+  },
+  "skills_generate": {            // Generate skill files (Gemini TOML, Cursor MD)
+    "source": "skills",
+    "target": "commands",
+    "format": "toml"
+  },
+  "extra_skills_dirs": ["work/skills"]  // Additional skills dirs (e.g., gitignored work skills)
+}
+```
+
+## Skills
+
+Skills live in `ai/skills/<skill-name>/SKILL.md`. Each skill is a markdown file with YAML frontmatter:
+
+```yaml
+---
+name: rreview
+description: Code review orchestrator with scout, review, and confidence filter phases
+argument-hint: "[PR-number]"
+user-invocable: true
+allowed-tools: Read, Glob, Grep, Bash, Agent, Task
+---
+```
+
+Skills are deployed differently per tool:
+- **Claude Code / OpenCode / Antigravity**: Symlinked as directories into the tool's skills folder
+- **Gemini CLI**: Converted to TOML format and written to `~/.gemini/commands/`
+- **Cursor**: Copied as markdown to `~/.cursor/commands/`
+
+## Agents (OpenCode)
+
+OpenCode agents live in `ai/modules/opencode/agents/*.md` with frontmatter:
+
+```yaml
+---
+description: Read-only codebase cartographer
+color: "#4169E1"
+tools:
+  - read
+  - glob
+  - grep
+---
+```
+
+These are symlinked individually into `~/.config/opencode/agents/`.
+
+## Templates
+
+`ai/templates/` contains reusable templates meant to be copied into repo roots:
+
+- `agents-reviews.md` — Review standards (copy as `AGENTS.reviews.md`)
+- `rules/python-patterns.md` — Python code patterns (copy to `.claude/rules/`)
+- `rules/react-patterns.md` — React patterns
+- `rules/typescript-patterns.md` — TypeScript patterns
+
+Templates have a `description` in frontmatter explaining their purpose and where to place them.
+
+## Work Directory
+
+`ai/work/` is gitignored. Use it for:
+- Work-specific skills (`ai/work/skills/`)
+- Provider setup scripts
+- Anything that shouldn't be committed to a public repo
+
+Tools with `extra_skills_dirs: ["work/skills"]` will pick up skills from here during setup.
+
+## Setup Flow
+
+```bash
+# Deploy all tools
+python scripts/setup.py
+
+# Deploy a specific tool
+python scripts/setup.py claude
+
+# List available tools
+python scripts/setup.py --list
+```
+
+The setup script:
+1. Reads `ai/tools.json`
+2. For each tool: creates config dir, symlinks files, generates skills, copies templates
+3. Handles backups of existing non-symlink configs
