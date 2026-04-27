@@ -16,7 +16,10 @@ import argparse
 import json
 import os
 import shutil
+import stat
+import subprocess
 import sys
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import TypedDict
@@ -65,6 +68,7 @@ class ToolConfig(TypedDict, total=False):
     skills_generate: SkillsGenerate
     memory_generate: MemoryGenerate
     extra_skills_dirs: list[str]
+    bootstrap: str
 
 
 class ToolsConfig(TypedDict):
@@ -448,6 +452,157 @@ def ensure_settings_from_template(tool_dir: Path, template_cfg: SettingsTemplate
     return True
 
 
+WORK_OVERLAY_ROOT = "work/modules"
+
+
+def deep_merge(base: Mapping[str, object], overlay: Mapping[str, object]) -> dict[str, object]:
+    """Recursively merge overlay into base. Overlay values win on leaves.
+
+    Nested dicts are merged key-by-key. Any non-dict value in overlay
+    replaces the corresponding value in base entirely (lists are not
+    concatenated — replacement only).
+
+    Args:
+        base: The base dict (not mutated).
+        overlay: The overlay dict whose values take precedence.
+
+    Returns:
+        A new merged dict.
+    """
+    result = dict(base)
+    for key, overlay_value in overlay.items():
+        base_value = result.get(key)
+        if isinstance(base_value, dict) and isinstance(overlay_value, dict):
+            result[key] = deep_merge(base_value, overlay_value)
+        else:
+            result[key] = overlay_value
+    return result
+
+
+def _merge_json_overlay(overlay_file: Path, target_file: Path) -> None:
+    overlay_data = json.loads(overlay_file.read_text())
+    if not isinstance(overlay_data, dict):
+        print_colored(
+            f"  Warning: overlay {overlay_file} is not a JSON object, skipping",
+            Colors.RED,
+        )
+        return
+
+    base_data: dict[str, object] = {}
+    if target_file.exists():
+        existing_text = target_file.read_text().strip()
+        if existing_text:
+            try:
+                loaded = json.loads(existing_text)
+                if isinstance(loaded, dict):
+                    base_data = loaded
+                else:
+                    print_colored(
+                        f"  Warning: {target_file} is not a JSON object; overwriting",
+                        Colors.YELLOW,
+                    )
+            except json.JSONDecodeError:
+                print_colored(
+                    f"  Warning: {target_file} is not valid JSON; overwriting",
+                    Colors.YELLOW,
+                )
+
+    merged = deep_merge(base_data, overlay_data)
+    target_file.parent.mkdir(parents=True, exist_ok=True)
+    if target_file.is_symlink():
+        target_file.unlink()
+    target_file.write_text(json.dumps(merged, indent=2) + "\n")
+    print_colored(f"  Merged overlay {overlay_file.name} into {target_file}", Colors.GREEN)
+
+
+def _run_overlay_script(script: Path) -> None:
+    mode = script.stat().st_mode
+    script.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    print_colored(f"  Running overlay script {script.name}", Colors.GREEN)
+    subprocess.run([str(script)], check=True)
+
+
+def _symlink_overlay_file(overlay_file: Path, target: Path) -> None:
+    backup_if_exists(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(overlay_file)
+    print_colored(f"  Overlay symlink {overlay_file.name} -> {target}", Colors.GREEN)
+
+
+def apply_work_overlay(tool_id: str, config_dir: Path, ai_root: Path) -> bool:
+    """Apply work-profile overlay for a tool, if present.
+
+    Looks for ai/work/modules/<tool_id>/. If found:
+      - *.json: deep-merged into config_dir/<same-name>
+      - *.sh: executed (user-managed, often idempotent provider setup)
+      - any other file: symlinked into config_dir/<same-name>
+
+    Args:
+        tool_id: The tool identifier (e.g., "opencode", "codex").
+        config_dir: The tool's deployed config directory (e.g., ~/.codex).
+        ai_root: The ai/ directory root in the repo.
+
+    Returns:
+        True when overlay applied cleanly (or absent), False on script failure.
+    """
+    overlay_dir = ai_root / WORK_OVERLAY_ROOT / tool_id
+    if not overlay_dir.exists():
+        return True
+
+    print_colored(f"  Applying work overlay from {overlay_dir}", Colors.BLUE)
+    success = True
+
+    for entry in sorted(overlay_dir.iterdir()):
+        if not entry.is_file():
+            continue
+
+        if entry.suffix == ".json":
+            _merge_json_overlay(entry, config_dir / entry.name)
+        elif entry.suffix == ".sh":
+            try:
+                _run_overlay_script(entry)
+            except subprocess.CalledProcessError as exc:
+                print_colored(
+                    f"  Warning: overlay script {entry.name} exited {exc.returncode}",
+                    Colors.RED,
+                )
+                success = False
+        else:
+            _symlink_overlay_file(entry, config_dir / entry.name)
+
+    return success
+
+
+def run_bootstrap(tool_dir: Path, script_name: str) -> bool:
+    """Run a tool's bootstrap script from its module directory.
+
+    Args:
+        tool_dir: The tool's source directory (e.g. ai/modules/codex).
+        script_name: The bootstrap filename relative to tool_dir.
+
+    Returns:
+        True if the script exits zero or is absent; False if it fails.
+    """
+    script = tool_dir / script_name
+    if not script.exists():
+        print_colored(f"  Warning: bootstrap {script} not found, skipping", Colors.YELLOW)
+        return False
+
+    mode = script.stat().st_mode
+    script.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+    print_colored(f"  Running bootstrap {script_name}", Colors.GREEN)
+    try:
+        subprocess.run([str(script)], check=True)
+    except subprocess.CalledProcessError as exc:
+        print_colored(
+            f"  Warning: bootstrap exited {exc.returncode}",
+            Colors.RED,
+        )
+        return False
+    return True
+
+
 def setup_tool(tool_id: str, tool_config: ToolConfig, ai_root: Path) -> bool:
     name = tool_config["name"]
     config_dir = Path(os.path.expanduser(tool_config["config_dir"]))
@@ -468,6 +623,10 @@ def setup_tool(tool_id: str, tool_config: ToolConfig, ai_root: Path) -> bool:
         config_dir.mkdir(parents=True)
 
     success = True
+
+    # Bootstrap runs first so the tool is installed before we deploy config.
+    if "bootstrap" in tool_config and not run_bootstrap(tool_dir, tool_config["bootstrap"]):
+        success = False
 
     # Handle settings template (must run before symlinks so the source file exists)
     if "settings_template" in tool_config:
@@ -521,6 +680,9 @@ def setup_tool(tool_id: str, tool_config: ToolConfig, ai_root: Path) -> bool:
             success = False
 
     setup_shell_alias(tool_id)
+
+    if not apply_work_overlay(tool_id, config_dir, ai_root):
+        success = False
 
     return success
 
