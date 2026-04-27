@@ -59,3 +59,37 @@ def test_agent_color_is_valid_hex(agent_name: str) -> None:
     assert re.fullmatch(r"#[0-9A-Fa-f]{6}", color), (
         f"{agent_path}: invalid hex color '{color}' (expected #RRGGBB)"
     )
+
+
+@pytest.mark.parametrize("agent_name", _get_agent_files())
+def test_agent_tools_is_mapping(agent_name: str) -> None:
+    agent_path = AGENTS_DIR / f"{agent_name}.md"
+    content = agent_path.read_text()
+
+    parts = content.split("---", 2)
+    yaml_content = parts[1] if len(parts) >= 3 else ""
+
+    tools_match = re.search(r"^tools:\s*$", yaml_content, re.MULTILINE)
+    if tools_match is None:
+        pytest.skip(f"Agent '{agent_name}' has no tools field")
+
+    block_start = tools_match.end()
+    block_lines: list[str] = []
+    for line in yaml_content[block_start:].splitlines():
+        if line and not line.startswith((" ", "\t")):
+            break
+        if line.strip():
+            block_lines.append(line)
+
+    assert block_lines, f"{agent_path}: 'tools:' block is empty"
+
+    for line in block_lines:
+        stripped = line.strip()
+        assert not stripped.startswith("-"), (
+            f"{agent_path}: 'tools' must be a mapping (key: true), not a list. "
+            f"Offending line: {line!r}"
+        )
+        assert re.match(r"^\s+[A-Za-z_][A-Za-z0-9_]*:\s*(true|false)\s*$", line), (
+            f"{agent_path}: invalid tools entry {line!r} "
+            "(expected '  <tool>: true' or '  <tool>: false')"
+        )
