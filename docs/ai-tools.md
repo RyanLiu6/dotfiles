@@ -9,6 +9,7 @@ ai/
 ├── memory/             Shared memory files (@-imported by tool-specific CLAUDE.md)
 ├── modules/            Per-tool configs deployed via symlink
 │   ├── claude/         Claude Code: CLAUDE.md, hooks/, settings.json, statusline.sh
+│   ├── codex/          Codex CLI + oh-my-codex: AGENTS.md, bootstrap.sh
 │   ├── gemini/         Gemini CLI: GEMINI.md
 │   ├── opencode/       OpenCode: AGENTS.md, opencode.json, agents/
 │   ├── cursor/         Cursor
@@ -17,7 +18,9 @@ ai/
 ├── skills/             Shared skill definitions (consumed by all supporting tools)
 ├── templates/          Reusable templates for repo-level files
 ├── tools.json          Tool registry — schema below
-└── work/               Work-specific configs (gitignored, not committed)
+└── work/               Work-specific overrides (gitignored, not committed)
+    ├── modules/        Per-tool overlays, mirrors modules/ layout
+    └── skills/         Work-specific skills (picked up via extra_skills_dirs)
 ```
 
 ## tools.json Schema
@@ -49,6 +52,7 @@ Each tool entry in `tools.json` defines how `scripts/setup.py` deploys it:
     "target": "commands",
     "format": "toml"
   },
+  "bootstrap": "bootstrap.sh",    // Script run from tool_dir before symlinks (e.g., npm install)
   "extra_skills_dirs": ["work/skills"]  // Additional skills dirs (e.g., gitignored work skills)
 }
 ```
@@ -81,9 +85,9 @@ OpenCode agents live in `ai/modules/opencode/agents/*.md` with frontmatter:
 description: Read-only codebase cartographer
 color: "#4169E1"
 tools:
-  - read
-  - glob
-  - grep
+  read: true
+  glob: true
+  grep: true
 ---
 ```
 
@@ -102,12 +106,39 @@ Templates have a `description` in frontmatter explaining their purpose and where
 
 ## Work Directory
 
-`ai/work/` is gitignored. Use it for:
-- Work-specific skills (`ai/work/skills/`)
-- Provider setup scripts
-- Anything that shouldn't be committed to a public repo
+`ai/work/` is gitignored. Its layout mirrors `ai/modules/` so work-specific
+overrides are per-tool:
 
-Tools with `extra_skills_dirs: ["work/skills"]` will pick up skills from here during setup.
+```
+ai/work/
+├── modules/
+│   ├── codex/          # e.g., config.toml with IC AI Gateway provider
+│   └── opencode/       # e.g., setup-providers.sh, overlay JSON
+└── skills/             # work-specific skills (symlinked via extra_skills_dirs)
+```
+
+### How overlays are applied
+
+For each tool, after the public module is deployed, `setup.py` checks for
+`ai/work/modules/<tool_id>/`. If present, each file is handled by extension:
+
+| Overlay file | Action |
+|---|---|
+| `*.json` | Deep-merged into the deployed config of the same name (overlay wins). If the deployed path is a symlink to the public module, it is broken first so the merge does not pollute the source. |
+| `*.sh` | Made executable and run. Intended for idempotent setup scripts (e.g., generating provider URLs from env/email). |
+| any other file | Symlinked into the config directory with the same name. |
+
+The overlay phase is opt-in by presence: no flags, no profile system. If
+`ai/work/modules/<tool_id>/` is absent or empty, the public module ships
+untouched. To reset cleanly after changing overlays, run `inv reset && inv setup`.
+
+### Bootstrap
+
+Tools with `"bootstrap": "<script>.sh"` run the named script from their
+`tool_dir` before any symlinks are laid down. This is where package
+installs happen — for example, `modules/codex/bootstrap.sh` runs
+`npm install -g @openai/codex oh-my-codex` and `omx setup`. Bootstrap
+scripts must be idempotent.
 
 ## Setup Flow
 

@@ -55,6 +55,15 @@
       "config_dir": "~/Library/Application Support/Code/User",
       "tool_dir": "modules/vscode",
       "symlinks": []
+    },
+    "codex": {
+      "name": "Codex CLI",
+      "config_dir": "~/.codex",
+      "tool_dir": "modules/codex",
+      "symlinks": [
+        {"source": "AGENTS.md", "target": "AGENTS.md"}
+      ],
+      "bootstrap": "bootstrap.sh"
     }
   }
 }
