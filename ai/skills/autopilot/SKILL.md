@@ -87,9 +87,7 @@ If any step fails, fix the issue and re-run. Repeat until all pass or report wha
 
 **Goal:** Final quality check.
 
-Spawn review agents (using `/review` skill prompt):
-- Code quality reviewer
-- Gilfoyle systems reviewer
+Run `/rreview` on the changes (3-phase pipeline: scouts, review, confidence filter).
 
 If reviewers flag blocking issues, fix them and re-run Phase 6.
 
