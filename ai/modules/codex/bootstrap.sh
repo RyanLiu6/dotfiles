@@ -9,6 +9,13 @@
 
 set -euo pipefail
 
+# `omx setup` prompts interactively for setup scope. CI has no TTY, so skip
+# the whole bootstrap — tests mock this path and don't need real installs.
+if [ "${CI:-}" = "true" ]; then
+  echo "bootstrap: CI detected — skipping codex + omx install"
+  exit 0
+fi
+
 if ! command -v npm >/dev/null 2>&1; then
   echo "bootstrap: npm not found. Install Node.js 20+ first." >&2
   exit 1
