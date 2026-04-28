@@ -55,6 +55,7 @@ Run `inv format` and `inv lint --fix` before committing.
 - Shell scripts use `lib/platform.sh` for cross-platform helpers (`detect_os`, `ensure_symlink`, etc.)
 - AI tool configs live in `ai/modules/<tool>/` — never edit deployed configs in `~/.claude/`, `~/.gemini/`, etc. directly
 - `ai/work/` is gitignored — put work-specific (non-public) configs there
+- `ai/work/modules/<tool>/` overlays fully replace the public file — when changing `ai/modules/<tool>/`, backport the edit to the work copy (see `docs/ai-tools.md` "Backporting settings changes")
 - `ai/skills/` contains shared skills consumed by all tools that support them
 - `scripts/setup.py` is the single source of truth for AI tool deployment — it reads `ai/tools.json`
 - Tests must pass before committing: `inv test && inv lint && inv typecheck`

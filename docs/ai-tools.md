@@ -124,13 +124,19 @@ For each tool, after the public module is deployed, `setup.py` checks for
 
 | Overlay file | Action |
 |---|---|
-| `*.json` | Deep-merged into the deployed config of the same name (overlay wins). If the deployed path is a symlink to the public module, it is broken first so the merge does not pollute the source. |
 | `*.sh` | Made executable and run. Intended for idempotent setup scripts (e.g., generating provider URLs from env/email). |
-| any other file | Symlinked into the config directory with the same name. |
+| any other file | Symlinked into the config directory with the same name, fully replacing any public file of that name. |
 
 The overlay phase is opt-in by presence: no flags, no profile system. If
 `ai/work/modules/<tool_id>/` is absent or empty, the public module ships
 untouched. To reset cleanly after changing overlays, run `inv reset && inv setup`.
+
+### Backporting settings changes
+
+When you edit a file in `ai/modules/<tool>/` that also has a work overlay
+counterpart in `ai/work/modules/<tool>/`, the overlay copy must be
+hand-updated. Overlays fully replace the public file — they do not
+merge. Nothing detects drift automatically.
 
 ### Bootstrap
 

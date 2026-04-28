@@ -293,6 +293,7 @@ class TestTeardown:
                 ".claude/settings.json",
             ],
         )
+        monkeypatch.setattr("tasks._load_overlay_paths", lambda: [])
 
         configs = {
             ".zprofile": fake_home / ".zprofile",
@@ -341,6 +342,7 @@ class TestTeardown:
         mock_run = MagicMock()
         monkeypatch.setattr("tasks.subprocess.run", mock_run)
         monkeypatch.setattr("tasks._load_ai_tool_paths", lambda: [])
+        monkeypatch.setattr("tasks._load_overlay_paths", lambda: [])
 
         real_file = fake_home / "real_zprofile"
         real_file.write_text("real")
@@ -374,5 +376,6 @@ class TestTeardown:
         mock_run = MagicMock()
         monkeypatch.setattr("tasks.subprocess.run", mock_run)
         monkeypatch.setattr("tasks._load_ai_tool_paths", lambda: [])
+        monkeypatch.setattr("tasks._load_overlay_paths", lambda: [])
 
         _teardown()

@@ -1,11 +1,9 @@
-import json
 from pathlib import Path
 from textwrap import dedent
 
 from scripts.setup import (
     apply_work_overlay,
     convert_md_to_toml,
-    deep_merge,
     ensure_settings_from_template,
     find_skill_files,
     generate_memory,
@@ -198,26 +196,6 @@ def test_ensure_settings_from_template_creates_from_template(tmp_path: Path) -> 
     assert '"from": "template"' in (tmp_path / "settings.json").read_text()
 
 
-def test_deep_merge() -> None:
-    base = {"a": 1, "b": {"c": 2, "d": 3}}
-    overlay = {"b": {"d": 99, "e": 4}, "f": 5}
-    assert deep_merge(base, overlay) == {"a": 1, "b": {"c": 2, "d": 99, "e": 4}, "f": 5}
-
-
-def test_deep_merge_leaves_base_untouched() -> None:
-    base = {"a": {"b": 1}}
-    overlay = {"a": {"c": 2}}
-    result = deep_merge(base, overlay)
-    assert base == {"a": {"b": 1}}
-    assert result == {"a": {"b": 1, "c": 2}}
-
-
-def test_deep_merge_overlay_replaces_non_dict() -> None:
-    base = {"a": [1, 2, 3], "b": {"x": 1}}
-    overlay = {"a": [9], "b": "scalar"}
-    assert deep_merge(base, overlay) == {"a": [9], "b": "scalar"}
-
-
 def test_apply_work_overlay_no_overlay(tmp_path: Path) -> None:
     ai_root = tmp_path / "ai"
     ai_root.mkdir()
@@ -225,45 +203,6 @@ def test_apply_work_overlay_no_overlay(tmp_path: Path) -> None:
     config_dir.mkdir()
 
     assert apply_work_overlay("ghost", config_dir, ai_root) is True
-
-
-def test_apply_work_overlay_merges_json(tmp_path: Path) -> None:
-    ai_root = tmp_path / "ai"
-    overlay = ai_root / "work" / "modules" / "mytool"
-    overlay.mkdir(parents=True)
-    (overlay / "config.json").write_text('{"providers": {"ic": {"url": "https://ic"}}}')
-
-    config_dir = tmp_path / "cfg"
-    config_dir.mkdir()
-    (config_dir / "config.json").write_text(
-        json.dumps({"permission": {"bash": "ask"}, "providers": {"openai": {"url": "oai"}}})
-    )
-
-    assert apply_work_overlay("mytool", config_dir, ai_root) is True
-
-    merged = json.loads((config_dir / "config.json").read_text())
-    assert merged["permission"] == {"bash": "ask"}
-    assert merged["providers"] == {"openai": {"url": "oai"}, "ic": {"url": "https://ic"}}
-
-
-def test_apply_work_overlay_breaks_symlink_before_writing(tmp_path: Path) -> None:
-    ai_root = tmp_path / "ai"
-    overlay = ai_root / "work" / "modules" / "mytool"
-    overlay.mkdir(parents=True)
-    (overlay / "config.json").write_text('{"extra": true}')
-
-    source = tmp_path / "source-config.json"
-    source.write_text('{"base": true}')
-    config_dir = tmp_path / "cfg"
-    config_dir.mkdir()
-    target = config_dir / "config.json"
-    target.symlink_to(source)
-
-    assert apply_work_overlay("mytool", config_dir, ai_root) is True
-
-    assert not target.is_symlink()
-    assert json.loads(target.read_text()) == {"base": True, "extra": True}
-    assert json.loads(source.read_text()) == {"base": True}
 
 
 def test_apply_work_overlay_runs_scripts(tmp_path: Path) -> None:
@@ -294,6 +233,22 @@ def test_apply_work_overlay_symlinks_other_files(tmp_path: Path) -> None:
     target = config_dir / "config.toml"
     assert target.is_symlink()
     assert target.resolve() == (overlay / "config.toml").resolve()
+
+
+def test_apply_work_overlay_symlinks_json(tmp_path: Path) -> None:
+    ai_root = tmp_path / "ai"
+    overlay = ai_root / "work" / "modules" / "mytool"
+    overlay.mkdir(parents=True)
+    (overlay / "opencode.json").write_text('{"providers": {"ic": {}}}')
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+
+    assert apply_work_overlay("mytool", config_dir, ai_root) is True
+
+    target = config_dir / "opencode.json"
+    assert target.is_symlink()
+    assert target.resolve() == (overlay / "opencode.json").resolve()
 
 
 def test_run_bootstrap_success(tmp_path: Path) -> None:
