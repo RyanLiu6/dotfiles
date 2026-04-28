@@ -1,7 +1,12 @@
 from pathlib import Path
 from textwrap import dedent
+from typing import cast
+from unittest.mock import MagicMock
+
+import pytest
 
 from scripts.setup import (
+    ToolConfig,
     apply_work_overlay,
     convert_md_to_toml,
     ensure_settings_from_template,
@@ -9,6 +14,7 @@ from scripts.setup import (
     generate_memory,
     parse_frontmatter,
     run_bootstrap,
+    setup_tool,
 )
 
 
@@ -269,3 +275,38 @@ def test_run_bootstrap_nonzero_exit(tmp_path: Path) -> None:
     script.write_text("#!/usr/bin/env bash\nexit 3\n")
 
     assert run_bootstrap(tmp_path, "bootstrap.sh") is False
+
+
+def test_setup_tool_skips_config_on_bootstrap_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ai_root = tmp_path / "ai"
+    tool_dir = ai_root / "modules" / "mytool"
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "CONFIG.md").write_text("config")
+
+    config_dir = tmp_path / "cfg"
+
+    tool_config = cast(
+        ToolConfig,
+        {
+            "name": "MyTool",
+            "config_dir": str(config_dir),
+            "tool_dir": "modules/mytool",
+            "symlinks": [{"source": "CONFIG.md", "target": "CONFIG.md"}],
+            "bootstrap": "bootstrap.sh",
+        },
+    )
+
+    monkeypatch.setattr("scripts.setup.run_bootstrap", lambda *_: False)
+    mock_symlink = MagicMock()
+    mock_alias = MagicMock()
+    monkeypatch.setattr("scripts.setup.create_symlink", mock_symlink)
+    monkeypatch.setattr("scripts.setup.setup_shell_alias", mock_alias)
+
+    result = setup_tool("mytool", tool_config, ai_root)
+
+    assert result is False
+    assert mock_symlink.called is False
+    assert not (config_dir / "CONFIG.md").exists()
+    mock_alias.assert_called_once_with("mytool")

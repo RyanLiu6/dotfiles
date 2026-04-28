@@ -560,66 +560,71 @@ def setup_tool(tool_id: str, tool_config: ToolConfig, ai_root: Path) -> bool:
         config_dir.mkdir(parents=True)
 
     success = True
+    bootstrap_ok = True
 
     # Bootstrap runs first so the tool is installed before we deploy config.
     if "bootstrap" in tool_config and not run_bootstrap(tool_dir, tool_config["bootstrap"]):
+        bootstrap_ok = False
         success = False
 
-    # Handle settings template (must run before symlinks so the source file exists)
-    if "settings_template" in tool_config:
-        ensure_settings_from_template(tool_dir, tool_config["settings_template"])
+    if bootstrap_ok:
+        # Handle settings template (must run before symlinks so the source file exists)
+        if "settings_template" in tool_config:
+            ensure_settings_from_template(tool_dir, tool_config["settings_template"])
 
-    for symlink in tool_config.get("symlinks", []):
-        source = tool_dir / symlink["source"]
-        target = config_dir / symlink["target"]
+        for symlink in tool_config.get("symlinks", []):
+            source = tool_dir / symlink["source"]
+            target = config_dir / symlink["target"]
 
-        if not create_symlink(source, target, symlink["source"]):
+            if not create_symlink(source, target, symlink["source"]):
+                success = False
+
+        if "skills_symlink" in tool_config:
+            skills_cfg = tool_config["skills_symlink"]
+            source_dir = ai_root / skills_cfg["source"]
+            target_dir = config_dir / skills_cfg["target"]
+
+            backup_if_exists(target_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+            skills_dirs = [source_dir]
+            for extra_dir_str in tool_config.get("extra_skills_dirs", []):
+                if extra_dir_str.startswith("~"):
+                    skills_dirs.append(Path(os.path.expanduser(extra_dir_str)))
+                else:
+                    skills_dirs.append(ai_root / extra_dir_str)
+
+            if not symlink_skills_to_config(skills_dirs, target_dir, "skills"):
+                success = False
+
+        if "agents_symlink" in tool_config:
+            agents_cfg = tool_config["agents_symlink"]
+            source_dir = ai_root / agents_cfg["source"]
+            target_dir = config_dir / agents_cfg["target"]
+
+            if not symlink_agents_to_config(source_dir, target_dir):
+                success = False
+
+        if "skills_generate" in tool_config:
+            skills_cfg = tool_config["skills_generate"]
+            source = ai_root / skills_cfg["source"]
+            target = config_dir / skills_cfg["target"]
+            fmt = skills_cfg.get("format", "md")
+            if not generate_skills(source, target, fmt):
+                success = False
+
+        if "memory_generate" in tool_config:
+            mem_cfg = tool_config["memory_generate"]
+            source = ai_root / mem_cfg["source"]
+            if not generate_memory(source, config_dir, mem_cfg["target"], mem_cfg["mode"]):
+                success = False
+
+        if not apply_work_overlay(tool_id, config_dir, ai_root):
             success = False
-
-    if "skills_symlink" in tool_config:
-        skills_cfg = tool_config["skills_symlink"]
-        source_dir = ai_root / skills_cfg["source"]
-        target_dir = config_dir / skills_cfg["target"]
-
-        backup_if_exists(target_dir)
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        skills_dirs = [source_dir]
-        for extra_dir_str in tool_config.get("extra_skills_dirs", []):
-            if extra_dir_str.startswith("~"):
-                skills_dirs.append(Path(os.path.expanduser(extra_dir_str)))
-            else:
-                skills_dirs.append(ai_root / extra_dir_str)
-
-        if not symlink_skills_to_config(skills_dirs, target_dir, "skills"):
-            success = False
-
-    if "agents_symlink" in tool_config:
-        agents_cfg = tool_config["agents_symlink"]
-        source_dir = ai_root / agents_cfg["source"]
-        target_dir = config_dir / agents_cfg["target"]
-
-        if not symlink_agents_to_config(source_dir, target_dir):
-            success = False
-
-    if "skills_generate" in tool_config:
-        skills_cfg = tool_config["skills_generate"]
-        source = ai_root / skills_cfg["source"]
-        target = config_dir / skills_cfg["target"]
-        fmt = skills_cfg.get("format", "md")
-        if not generate_skills(source, target, fmt):
-            success = False
-
-    if "memory_generate" in tool_config:
-        mem_cfg = tool_config["memory_generate"]
-        source = ai_root / mem_cfg["source"]
-        if not generate_memory(source, config_dir, mem_cfg["target"], mem_cfg["mode"]):
-            success = False
+    else:
+        print_colored(f"  Aborting {name} config deployment: bootstrap failed", Colors.RED)
 
     setup_shell_alias(tool_id)
-
-    if not apply_work_overlay(tool_id, config_dir, ai_root):
-        success = False
 
     return success
 

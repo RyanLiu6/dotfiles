@@ -146,6 +146,10 @@ installs happen — for example, `modules/codex/bootstrap.sh` runs
 `npm install -g @openai/codex oh-my-codex` and `omx setup`. Bootstrap
 scripts must be idempotent.
 
+Bootstrap requires a TTY on first run — `omx setup` may prompt
+interactively. `inv setup` already uses `pty=True`, so this is only
+relevant if someone calls `scripts/setup.py` directly in CI.
+
 ## Setup Flow
 
 ```bash

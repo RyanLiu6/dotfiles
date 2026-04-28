@@ -25,4 +25,11 @@ fi
 echo "bootstrap: running omx setup..."
 omx setup
 
+# omx setup writes ~/.codex/AGENTS.md. Remove the regular file it creates
+# so setup.py's symlink step doesn't back it up on every run. Keep our
+# own symlink intact on repeat runs.
+if [ -e "$HOME/.codex/AGENTS.md" ] && [ ! -L "$HOME/.codex/AGENTS.md" ]; then
+  rm -f "$HOME/.codex/AGENTS.md"
+fi
+
 echo "bootstrap: codex + oh-my-codex ready."
