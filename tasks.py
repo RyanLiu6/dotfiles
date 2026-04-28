@@ -42,11 +42,45 @@ def _load_ai_tool_paths() -> list[str]:
         if "skills_symlink" in tool:
             paths.append(f"{rel_dir}/{tool['skills_symlink']['target']}")
 
+        if "agents_symlink" in tool:
+            paths.append(f"{rel_dir}/{tool['agents_symlink']['target']}")
+
         if "skills_generate" in tool:
             paths.append(f"{rel_dir}/{tool['skills_generate']['target']}")
 
         if "memory_generate" in tool:
             paths.append(f"{rel_dir}/{tool['memory_generate']['target']}")
+
+    return paths
+
+
+def _load_overlay_paths() -> list[str]:
+    """Derive overlay-deployed paths from ai/work/modules/<tool_id>/.
+
+    For each tool in tools.json, walk the matching overlay directory and
+    emit target paths for every file that setup.py would symlink. `.sh`
+    files are skipped: they execute arbitrary side effects whose outputs
+    aren't knowable from the filename alone, so teardown can't track them.
+
+    Returns:
+        List of paths relative to $HOME (e.g. ".codex/config.toml").
+    """
+    config_path = REPO_DIR / "ai" / "tools.json"
+    with open(config_path) as f:
+        config = json.load(f)
+
+    overlay_root = REPO_DIR / "ai" / "work" / "modules"
+    paths: list[str] = []
+    for tool_id, tool in config.get("tools", {}).items():
+        overlay_dir = overlay_root / tool_id
+        if not overlay_dir.exists():
+            continue
+
+        rel_dir = tool["config_dir"].removeprefix("~/")
+        for entry in sorted(overlay_dir.iterdir()):
+            if not entry.is_file() or entry.suffix == ".sh":
+                continue
+            paths.append(f"{rel_dir}/{entry.name}")
 
     return paths
 
@@ -193,7 +227,7 @@ def _teardown() -> None:
         print(f"  → Removing {starship}")
         starship.unlink()
 
-    for rel_path in _load_ai_tool_paths():
+    for rel_path in _load_ai_tool_paths() + _load_overlay_paths():
         path = home / rel_path
         if path.is_symlink():
             print(f"  → Removing AI symlink: {path}")

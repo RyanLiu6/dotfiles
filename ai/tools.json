@@ -31,7 +31,9 @@
         {"source": "AGENTS.md", "target": "AGENTS.md"},
         {"source": "opencode.json", "target": "opencode.json"}
       ],
-      "skills_symlink": {"source": "skills", "target": "command"}
+      "skills_symlink": {"source": "skills", "target": "command"},
+      "agents_symlink": {"source": "modules/opencode/agents", "target": "agents"},
+      "extra_skills_dirs": ["work/skills"]
     },
     "cursor": {
       "name": "Cursor",
@@ -53,6 +55,15 @@
       "config_dir": "~/Library/Application Support/Code/User",
       "tool_dir": "modules/vscode",
       "symlinks": []
+    },
+    "codex": {
+      "name": "Codex CLI",
+      "config_dir": "~/.codex",
+      "tool_dir": "modules/codex",
+      "symlinks": [
+        {"source": "AGENTS.md", "target": "AGENTS.md"}
+      ],
+      "bootstrap": "bootstrap.sh"
     }
   }
 }

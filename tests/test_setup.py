@@ -1,12 +1,20 @@
 from pathlib import Path
 from textwrap import dedent
+from typing import cast
+from unittest.mock import MagicMock
+
+import pytest
 
 from scripts.setup import (
+    ToolConfig,
+    apply_work_overlay,
     convert_md_to_toml,
     ensure_settings_from_template,
     find_skill_files,
     generate_memory,
     parse_frontmatter,
+    run_bootstrap,
+    setup_tool,
 )
 
 
@@ -192,3 +200,161 @@ def test_ensure_settings_from_template_creates_from_template(tmp_path: Path) -> 
 
     assert result is True
     assert '"from": "template"' in (tmp_path / "settings.json").read_text()
+
+
+def test_apply_work_overlay_no_overlay(tmp_path: Path) -> None:
+    ai_root = tmp_path / "ai"
+    ai_root.mkdir()
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+
+    assert apply_work_overlay("ghost", config_dir, ai_root) is True
+
+
+def test_apply_work_overlay_runs_scripts(tmp_path: Path) -> None:
+    ai_root = tmp_path / "ai"
+    overlay = ai_root / "work" / "modules" / "mytool"
+    overlay.mkdir(parents=True)
+    marker = tmp_path / "ran.txt"
+    (overlay / "setup.sh").write_text(f"#!/usr/bin/env bash\necho ok > {marker}\n")
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+
+    assert apply_work_overlay("mytool", config_dir, ai_root) is True
+    assert marker.read_text().strip() == "ok"
+
+
+def test_apply_work_overlay_symlinks_other_files(tmp_path: Path) -> None:
+    ai_root = tmp_path / "ai"
+    overlay = ai_root / "work" / "modules" / "mytool"
+    overlay.mkdir(parents=True)
+    (overlay / "config.toml").write_text("[profiles.work]\nmodel = 'x'\n")
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+
+    assert apply_work_overlay("mytool", config_dir, ai_root) is True
+
+    target = config_dir / "config.toml"
+    assert target.is_symlink()
+    assert target.resolve() == (overlay / "config.toml").resolve()
+
+
+def test_apply_work_overlay_symlinks_json(tmp_path: Path) -> None:
+    ai_root = tmp_path / "ai"
+    overlay = ai_root / "work" / "modules" / "mytool"
+    overlay.mkdir(parents=True)
+    (overlay / "opencode.json").write_text('{"providers": {"ic": {}}}')
+
+    config_dir = tmp_path / "cfg"
+    config_dir.mkdir()
+
+    assert apply_work_overlay("mytool", config_dir, ai_root) is True
+
+    target = config_dir / "opencode.json"
+    assert target.is_symlink()
+    assert target.resolve() == (overlay / "opencode.json").resolve()
+
+
+def test_run_bootstrap_success(tmp_path: Path) -> None:
+    marker = tmp_path / "ran.txt"
+    script = tmp_path / "bootstrap.sh"
+    script.write_text(f"#!/usr/bin/env bash\necho ok > {marker}\n")
+
+    assert run_bootstrap(tmp_path, "bootstrap.sh") is True
+    assert marker.read_text().strip() == "ok"
+
+
+def test_run_bootstrap_missing(tmp_path: Path) -> None:
+    assert run_bootstrap(tmp_path, "missing.sh") is False
+
+
+def test_run_bootstrap_nonzero_exit(tmp_path: Path) -> None:
+    script = tmp_path / "bootstrap.sh"
+    script.write_text("#!/usr/bin/env bash\nexit 3\n")
+
+    assert run_bootstrap(tmp_path, "bootstrap.sh") is False
+
+
+def test_setup_tool_skips_config_on_bootstrap_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ai_root = tmp_path / "ai"
+    tool_dir = ai_root / "modules" / "mytool"
+    tool_dir.mkdir(parents=True)
+    (tool_dir / "CONFIG.md").write_text("config")
+
+    config_dir = tmp_path / "cfg"
+
+    tool_config = cast(
+        ToolConfig,
+        {
+            "name": "MyTool",
+            "config_dir": str(config_dir),
+            "tool_dir": "modules/mytool",
+            "symlinks": [{"source": "CONFIG.md", "target": "CONFIG.md"}],
+            "bootstrap": "bootstrap.sh",
+        },
+    )
+
+    monkeypatch.setattr("scripts.setup.run_bootstrap", lambda *_: False)
+    mock_symlink = MagicMock()
+    mock_alias = MagicMock()
+    monkeypatch.setattr("scripts.setup.create_symlink", mock_symlink)
+    monkeypatch.setattr("scripts.setup.setup_shell_alias", mock_alias)
+
+    result = setup_tool("mytool", tool_config, ai_root)
+
+    assert result is False
+    assert mock_symlink.called is False
+    assert not (config_dir / "CONFIG.md").exists()
+    mock_alias.assert_called_once_with("mytool")
+
+
+def test_setup_tool_codex_symlinks_agents_without_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end codex flow with bootstrap mocked: no real npm/omx invocation.
+
+    Simulates `omx setup` writing a regular `AGENTS.md` into the config dir,
+    followed by the bootstrap script's cleanup of that regular file. Then lets
+    the real symlink step run. The target must end up as a symlink to the
+    source, with no `.backup.*` residue from earlier runs.
+    """
+    ai_root = tmp_path / "ai"
+    tool_dir = ai_root / "modules" / "codex"
+    tool_dir.mkdir(parents=True)
+    source_agents = tool_dir / "AGENTS.md"
+    source_agents.write_text("source agents")
+    (tool_dir / "bootstrap.sh").write_text("#!/usr/bin/env bash\n")
+
+    config_dir = tmp_path / "dot-codex"
+
+    tool_config = cast(
+        ToolConfig,
+        {
+            "name": "Codex CLI",
+            "config_dir": str(config_dir),
+            "tool_dir": "modules/codex",
+            "symlinks": [{"source": "AGENTS.md", "target": "AGENTS.md"}],
+            "bootstrap": "bootstrap.sh",
+        },
+    )
+
+    def fake_bootstrap(_tool_dir: Path, _script: str) -> bool:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        agents = config_dir / "AGENTS.md"
+        agents.write_text("omx default")
+        if agents.exists() and not agents.is_symlink():
+            agents.unlink()
+        return True
+
+    monkeypatch.setattr("scripts.setup.run_bootstrap", fake_bootstrap)
+
+    assert setup_tool("codex", tool_config, ai_root) is True
+
+    deployed = config_dir / "AGENTS.md"
+    assert deployed.is_symlink()
+    assert deployed.resolve() == source_agents.resolve()
+    assert list(config_dir.glob("*.backup.*")) == []
