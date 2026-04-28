@@ -310,3 +310,51 @@ def test_setup_tool_skips_config_on_bootstrap_failure(
     assert mock_symlink.called is False
     assert not (config_dir / "CONFIG.md").exists()
     mock_alias.assert_called_once_with("mytool")
+
+
+def test_setup_tool_codex_symlinks_agents_without_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end codex flow with bootstrap mocked: no real npm/omx invocation.
+
+    Simulates `omx setup` writing a regular `AGENTS.md` into the config dir,
+    followed by the bootstrap script's cleanup of that regular file. Then lets
+    the real symlink step run. The target must end up as a symlink to the
+    source, with no `.backup.*` residue from earlier runs.
+    """
+    ai_root = tmp_path / "ai"
+    tool_dir = ai_root / "modules" / "codex"
+    tool_dir.mkdir(parents=True)
+    source_agents = tool_dir / "AGENTS.md"
+    source_agents.write_text("source agents")
+    (tool_dir / "bootstrap.sh").write_text("#!/usr/bin/env bash\n")
+
+    config_dir = tmp_path / "dot-codex"
+
+    tool_config = cast(
+        ToolConfig,
+        {
+            "name": "Codex CLI",
+            "config_dir": str(config_dir),
+            "tool_dir": "modules/codex",
+            "symlinks": [{"source": "AGENTS.md", "target": "AGENTS.md"}],
+            "bootstrap": "bootstrap.sh",
+        },
+    )
+
+    def fake_bootstrap(_tool_dir: Path, _script: str) -> bool:
+        config_dir.mkdir(parents=True, exist_ok=True)
+        agents = config_dir / "AGENTS.md"
+        agents.write_text("omx default")
+        if agents.exists() and not agents.is_symlink():
+            agents.unlink()
+        return True
+
+    monkeypatch.setattr("scripts.setup.run_bootstrap", fake_bootstrap)
+
+    assert setup_tool("codex", tool_config, ai_root) is True
+
+    deployed = config_dir / "AGENTS.md"
+    assert deployed.is_symlink()
+    assert deployed.resolve() == source_agents.resolve()
+    assert list(config_dir.glob("*.backup.*")) == []
